@@ -61,14 +61,24 @@ uint16 txsize;
 
 uint8array temp_service_uuid;
 uint8array temp_char_uuid;
+uint8array env_service_uuid;
+uint8array humidity_char_uuid;
 uint8_t slave_addr_to_match[] = {0x00, 0x0B, 0x57, 0x05, 0xE0, 0xD7};
 bool slave_addr_match = false;
 
+#if 0
 uint8_t temp_service_uuid_string[5];
+#endif
+
+bool service_handling_in_progress = false;
 
 static connState state = eStateDisconnected;
 
 uint8 char_rcvd_data;
+uint8 temp_rcvd_data[20];
+
+//#define MEASURE_HUMIDITY
+#define MEASURE_TEMPERATURE
 
 /***********************************************************************************************//**
  * @addtogroup Application
@@ -92,12 +102,12 @@ uint8 char_rcvd_data;
 /***************************************************************************************************
  Static Function Declarations
  **************************************************************************************************/
-#ifndef FEATURE_IOEXPANDER
-/* Periodically called Display Polarity Inverter Function for the LCD.
+   #ifndef FEATURE_IOEXPANDER
+ /* Periodically called Display Polarity Inverter Function for the LCD.
   Toggles the the EXTCOMIN signal of the Sharp memory LCD panel, which prevents building up a DC 
   bias according to the LCD's datasheet */
 static void (*dispPolarityInvert)(void *);
-#endif /* FEATURE_IOEXPANDER */
+  #endif /* FEATURE_IOEXPANDER */
 
 /***************************************************************************************************
  Function Definitions
@@ -108,31 +118,31 @@ static void (*dispPolarityInvert)(void *);
  **************************************************************************************************/
 void appInit(void)
 {
-	/* Unique device ID */
-	uint16_t devId;
-	struct gecko_msg_system_get_bt_address_rsp_t* btAddr;
-	char devName[APP_DEVNAME_LEN + 1];
+  /* Unique device ID */
+  uint16_t devId;
+  struct gecko_msg_system_get_bt_address_rsp_t* btAddr;
+  char devName[APP_DEVNAME_LEN + 1];
 
-	/* Init device name */
-	/* Get the unique device ID */
+  /* Init device name */
+  /* Get the unique device ID */
 
-	/* Create the device name based on the 16-bit device ID */
-	btAddr = gecko_cmd_system_get_bt_address();
-	devId = *((uint16*)(btAddr->address.addr));
-	snprintf(devName, APP_DEVNAME_LEN + 1, APP_DEVNAME, devId);
-	gecko_cmd_gatt_server_write_attribute_value(gattdb_device_name,
-			0,
-			strlen(devName),
-			(uint8_t *)devName);
+  /* Create the device name based on the 16-bit device ID */
+  btAddr = gecko_cmd_system_get_bt_address();
+  devId = *((uint16*)(btAddr->address.addr));
+  snprintf(devName, APP_DEVNAME_LEN + 1, APP_DEVNAME, devId);
+  gecko_cmd_gatt_server_write_attribute_value(gattdb_device_name,
+                                              0,
+                                              strlen(devName),
+                                              (uint8_t *)devName);
 
-	/* Initialize LEDs, buttons, graphics. */
-	//appUiInit(devId);
+  /* Initialize LEDs, buttons, graphics. */
+  //appUiInit(devId);
 
-	/* Hardware initialization. Initializes temperature sensor. */
-	//appHwInit();
+  /* Hardware initialization. Initializes temperature sensor. */
+  //appHwInit();
 
-	/* Initialize services */
-	//htmInit();
+  /* Initialize services */
+  //htmInit();
 }
 
 /***********************************************************************************************//**
@@ -141,22 +151,22 @@ void appInit(void)
 static bool decode_adv_data(uint8array* data, const uint8_t* uuid )
 {
 
-	uint8_t i = 0;
+  uint8_t i = 0;
 
-	while ( i < (data->len - 1) )
-	{
-		uint8_t ad_len  = data->data[i];
-		uint8_t ad_type = data->data[i+1];
+  while ( i < (data->len - 1) )
+  {
+    uint8_t ad_len  = data->data[i];
+    uint8_t ad_type = data->data[i+1];
 
-		if ( ( ad_type == 0x06 || ad_type == 0x07 ) && memcmp(uuid, &data->data[i+2], 2) )
-		{
-			return true;
-		} else {
-			i += ad_len + 1;
-		}
-	}
+    if ( ( ad_type == 0x06 || ad_type == 0x07 ) && memcmp(uuid, &data->data[i+2], 2) )
+    {
+      return true;
+    } else {
+      i += ad_len + 1;
+    }
+  }
 
-	return false;
+  return false;
 
 }
 
@@ -222,6 +232,8 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		/* TODO: Try adding a sleep here just to have a slight delay for the discovery */
 		gecko_sleep_for_ms(100);
 
+		service_handling_in_progress = false;
+
 		break;
 
 		/* This event is generated when a connected client has either
@@ -258,9 +270,9 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 			{
 				memcpy(slave_bluetooth_addr.addr, evt->data.evt_le_gap_scan_response.address.addr, sizeof(bd_addr));
 
-				slave_bluetooth_addr_type = evt->data.evt_le_gap_scan_response.address_type;
-				gecko_cmd_le_gap_open(slave_bluetooth_addr, slave_bluetooth_addr_type);
-			}
+			slave_bluetooth_addr_type = evt->data.evt_le_gap_scan_response.address_type;
+			gecko_cmd_le_gap_open(slave_bluetooth_addr, slave_bluetooth_addr_type);
+		}
 #else
 			/* Device is set in active scan mode, so checking for scan response */
 			if (evt->data.evt_le_gap_scan_response.packet_type == 0x04)
@@ -279,9 +291,9 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 				gecko_cmd_le_gap_open(slave_bluetooth_addr, slave_bluetooth_addr_type);
 			}
 #endif
-			break;
+		break;
 
-			/* Connection opened event */
+		/* Connection opened event */
 	case gecko_evt_le_connection_opened_id:
 		/* Call advertisement.c connection started callback */
 		//advConnectionStarted();
@@ -298,13 +310,31 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 				 * GATT database for the slave identified by the
 				 * newly acquired connection handle */
 
+#ifdef MEASURE_TEMPERATURE
+				/* Discover temperature measurement service -
+				 * with temperature value and type as characteristic */
 				temp_service_uuid.len = 2;
-				temp_service_uuid.data[0] = 0x1A;
+				temp_service_uuid.data[0] = 0x09;
 				temp_service_uuid.data[1] = 0x18;
-				struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_pri_serv_rsp =
-						gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, temp_service_uuid.len, temp_service_uuid.data);
 
-				//uint16 disc_pri_serv_rsp_result = disc_pri_serv_rsp->result;
+				struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_temp_pri_serv_rsp =
+						gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, temp_service_uuid.len,
+								temp_service_uuid.data);
+#endif
+
+#ifdef MEASURE_HUMIDITY
+				service_handling_in_progress = true;
+
+				/* Discover environmental sensing service - with humidity info as characteristic */
+				env_service_uuid.len = 2;
+				env_service_uuid.data[0] = 0x1A;
+				env_service_uuid.data[1] = 0x18;
+				struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_env_pri_serv_rsp =
+						gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, env_service_uuid.len,
+								env_service_uuid.data);
+
+				//uint16 disc_env_pri_serv_rsp_result = disc_env_pri_serv_rsp->result;
+#endif
 
 				//gecko_cmd_gatt_discover_primary_services(slave_conn_handle);
 				state = eStateFindService;
@@ -326,12 +356,14 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 	case gecko_evt_gatt_service_id:
 		/* This event is triggered when a service is discovered from the remote GATT database */
 		slave_service_handle = evt->data.evt_gatt_service.service;
+		service_handling_in_progress = false;
 
 		//gecko_cmd_le_gap_end_procedure();
 
 		break;
 
 #if 0
+#ifdef MEASURE_TEMPERATURE
 	case gecko_evt_gatt_server_attribute_value_id:
 		if ( evt->data.evt_gatt_server_attribute_value.attribute == gattdb_temp_measurement)
 		{
@@ -340,15 +372,18 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		}
 		break;
 #endif
+#endif
 
 	case gecko_evt_gatt_characteristic_id:
 		/* This event is triggered when a characteristic is discovered from the remote GATT database */
-#if 0
+#ifdef MEASURE_TEMPERATURE
 		if (memcmp(evt->data.evt_gatt_characteristic.uuid.data, temp_char_uuid.data, temp_char_uuid.len) == 0)
 		{
 			slave_characteristic_handle = evt->data.evt_gatt_characteristic.characteristic;
 		}
-#else
+#endif
+
+#ifdef MEASURE_HUMIDITY
 		slave_characteristic_handle = evt->data.evt_gatt_characteristic.characteristic;
 		slave_characteristic_connection = evt->data.evt_gatt_characteristic.connection;
 		//gecko_cmd_le_gap_end_procedure();
@@ -357,13 +392,28 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 
 	case gecko_evt_gatt_characteristic_value_id:
 		//process receiving data
+#ifdef MEASURE_TEMPERATURE
 #if 0
-		if ( evt->data.evt_gatt_characteristic_value.characteristic == slave_characteristic_handle)
+		if ( (evt->data.evt_gatt_characteristic_value.characteristic == slave_characteristic_handle) &&
+		(evt->data.evt_gatt_characteristic_value.att_opcode == gatt_handle_value_notification))
 		{
-			uint8array* rdata = &evt->data.evt_gatt_characteristic_value.value;
+			//uint8array* rdata = &evt->data.evt_gatt_characteristic_value.value;
+
+			memcpy(temp_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
+			uint8_t length = evt->data.evt_gatt_characteristic_value.value.len;
 			gecko_sleep_for_ms(10);
 		}
 #else
+		if (evt->data.evt_gatt_characteristic_value.att_opcode == gatt_handle_value_notification)
+		{
+			memcpy(temp_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
+			int temp_data = ((temp_rcvd_data[4] << 24 | temp_rcvd_data[3] << 16 | temp_rcvd_data[2] << 8 | temp_rcvd_data[1]) & 0x00FFFFFF);
+			float temp_val = (float)temp_data/1000;
+		}
+#endif
+#endif
+
+#ifdef MEASURE_HUMIDITY
 		memcpy(&char_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, sizeof(char_rcvd_data));
 		uint8_t length = evt->data.evt_gatt_characteristic_value.value.len;
 #endif
@@ -378,15 +428,29 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 				//gecko_cmd_gatt_discover_characteristics(evt->data.evt_gatt_procedure_completed.connection, slave_service_handle);
 				state = eStateFindCharacteristic;
 
-				/* Discover temperature measurement characteristic */
+#ifdef MEASURE_TEMPERATURE
+				/* Discover humidity measurement characteristic */
 				temp_char_uuid.len = 2;
-				temp_char_uuid.data[0] = 0x6F;
+				temp_char_uuid.data[0] = 0x1C;
 				temp_char_uuid.data[1] = 0x2A;
-				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_char_rsp =
+				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_temp_val_char_rsp =
 						gecko_cmd_gatt_discover_characteristics_by_uuid(evt->data.evt_gatt_service.connection, slave_service_handle,
 								temp_char_uuid.len, temp_char_uuid.data);
 
-				uint16 disc_char_rsp_res = disc_char_rsp->result;
+				uint16 disc_temp_val_char_rsp_res = disc_temp_val_char_rsp->result;
+#endif
+
+#ifdef MEASURE_HUMIDITY
+				/* Discover humidity measurement characteristic */
+				humidity_char_uuid.len = 2;
+				humidity_char_uuid.data[0] = 0x6F;
+				humidity_char_uuid.data[1] = 0x2A;
+				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_humidity_char_rsp =
+						gecko_cmd_gatt_discover_characteristics_by_uuid(evt->data.evt_gatt_service.connection, slave_service_handle,
+								humidity_char_uuid.len, humidity_char_uuid.data);
+
+				uint16 disc_humidity_char_rsp_res = disc_humidity_char_rsp->result;
+#endif
 			}
 			break;
 
@@ -396,15 +460,20 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		{
 			if ( slave_characteristic_handle > 0 )
 			{
-				/* gecko_cmd_gatt_set_characteristic_notification(evt->data.evt_gatt_procedure_completed.connection,
-						slave_characteristic_handle,gatt_notification); */
-				//state = eStateEnableNotif;
-
+#ifdef MEASURE_HUMIDITY
 				struct gecko_msg_gatt_read_characteristic_value_by_uuid_rsp_t* char_read_rsp =
 						gecko_cmd_gatt_read_characteristic_value_by_uuid(slave_conn_handle,
-								slave_service_handle, temp_char_uuid.len, temp_char_uuid.data);
+								slave_service_handle, humidity_char_uuid.len, humidity_char_uuid.data);
 
 				uint16 char_rd_rsp_res = char_read_rsp->result;
+#endif
+
+#ifdef MEASURE_TEMPERATURE
+				struct gecko_msg_gatt_set_characteristic_notification_rsp_t* temp_set_notif_rsp =
+						gecko_cmd_gatt_set_characteristic_notification(slave_conn_handle, slave_characteristic_handle,gatt_notification);
+#endif
+
+				state = eStateEnableNotif;
 			}
 			break;
 		}
@@ -477,35 +546,35 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 
 		default:
 			break;
-		}
 	}
+}
 
-	/**************************************************************************//**
-	 * @brief   Register a callback function at the given frequency.
-	 *
-	 * @param[in] pFunction  Pointer to function that should be called at the
-	 *                       given frequency.
-	 * @param[in] argument   Argument to be given to the function.
-	 * @param[in] frequency  Frequency at which to call function at.
-	 *
-	 * @return  0 for successful or
-	 *         -1 if the requested frequency does not match the RTC frequency.
-	 *****************************************************************************/
-	int rtcIntCallbackRegister(void (*pFunction)(void*),
-			void* argument,
-			unsigned int frequency)
-	{
-#ifndef FEATURE_IOEXPANDER
+/**************************************************************************//**
+ * @brief   Register a callback function at the given frequency.
+ *
+ * @param[in] pFunction  Pointer to function that should be called at the
+ *                       given frequency.
+ * @param[in] argument   Argument to be given to the function.
+ * @param[in] frequency  Frequency at which to call function at.
+ *
+ * @return  0 for successful or
+ *         -1 if the requested frequency does not match the RTC frequency.
+ *****************************************************************************/
+int rtcIntCallbackRegister(void (*pFunction)(void*),
+                           void* argument,
+                           unsigned int frequency)
+{
+  #ifndef FEATURE_IOEXPANDER
+  
+  dispPolarityInvert =  pFunction;
+  /* Start timer with required frequency */
+  gecko_cmd_hardware_set_soft_timer(TIMER_MS_2_TIMERTICK(1000/frequency), DISP_POL_INV_TIMER, false);
+  
+  #endif /* FEATURE_IOEXPANDER */
 
-		dispPolarityInvert =  pFunction;
-		/* Start timer with required frequency */
-		gecko_cmd_hardware_set_soft_timer(TIMER_MS_2_TIMERTICK(1000/frequency), DISP_POL_INV_TIMER, false);
-
-#endif /* FEATURE_IOEXPANDER */
-
-		return 0;
-	}
+  return 0;
+}
 
 
-	/** @} (end addtogroup app) */
-	/** @} (end addtogroup Application) */
+/** @} (end addtogroup app) */
+/** @} (end addtogroup Application) */
