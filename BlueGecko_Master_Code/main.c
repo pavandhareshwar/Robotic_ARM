@@ -17,6 +17,7 @@
 #include "boards.h"
 #include "ble-configuration.h"
 #include "board_features.h"
+#include "MotorDriver.h"
 
 /* BG stack headers */
 #include "bg_types.h"
@@ -90,6 +91,20 @@ static const gecko_configuration_t config = {
 
 void Clock_SetUp(void)
 {
+	if(selfcalibrate)
+	{
+		CMU_ClockEnable(cmuClock_LETIMER0, true);
+		CMU_ClockEnable(cmuClock_TIMER0, true);
+		CMU_ClockEnable(cmuClock_TIMER1, true);
+
+		ULFRCOCalibrate();
+
+		CMU_ClockEnable(cmuClock_TIMER0, false);
+		CMU_ClockEnable(cmuClock_TIMER1, false);
+		CMU_OscillatorEnable(cmuOsc_ULFRCO, true, true);
+		CMU_ClockSelectSet(cmuClock_LFA, cmuSelect_ULFRCO);
+	}
+
 	CMU_ClockEnable(cmuClock_CORELE, true); 			/* To enable the low frequency clock tree */
 
 	/* Enable necessary clocks */
@@ -100,6 +115,7 @@ void Clock_SetUp(void)
 
 	CMU_ClockEnable(cmuClock_GPIO, true);				/* To enable clock to GPIO */
 }
+
 
 int main(void)
 {
