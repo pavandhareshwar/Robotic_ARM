@@ -1,0 +1,13 @@
+// Copyright 2017 Silicon Laboratories, Inc.
+//
+//
+
+Executing: bgbuild
+Output:
+ALL OK
+
+Error:
+Unknown option 'n'.
+WARNING: 2a6f length attribute is 1 but actual value length is 4. 1 will be used.
+
+
