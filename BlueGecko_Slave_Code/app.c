@@ -46,10 +46,14 @@
 /* Own header */
 #include "app.h"
 
+#include "dmadrv.h"
+
 int power_led_status = 0;
 int connected = 0;
 int alarm_status = 0;
 int alarm_count = 0;
+
+int8 rssi = 0;
 
 /***********************************************************************************************//**
  * @addtogroup Application
@@ -165,8 +169,11 @@ void manage_alarm_led()
  **************************************************************************************************/
 void appHandleEvents(struct gecko_cmd_packet *evt)
 {
+	static int i = 0;
 	/* Flag for indicating DFU Reset must be performed */
 	static uint8_t boot_to_dfu = 0;
+
+	int humidityData;
 
 	switch (BGLIB_MSG_ID(evt->header)) {
 
@@ -195,20 +202,32 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		/* Code for the link loss service example */
 
 		/* LED0 - Power LED */
-		GPIO_PinModeSet(gpioPortF, 4, gpioModePushPull, 0);
+		GPIO_PinModeSet(gpioPortF, 4, gpioModePushPull, 1);
 
 		/* LED1 - Alarm LED */
-		GPIO_PinModeSet(gpioPortF, 5, gpioModePushPull, 0);
+		GPIO_PinModeSet(gpioPortF, 5, gpioModePushPull, 1);
 
 		/* -------------------------------------------------------------------------- */
 
+		/* Changing the connInterval and the transmit power */
 		/* Set advertising parameters. 100ms advertisement interval. All channels used.
 		 * The first two parameters are minimum and maximum advertising interval, both in
 		 * units of (milliseconds * 1.6). The third parameter '7' sets advertising on all channels. */
 		gecko_cmd_le_gap_set_adv_parameters(160,160,7);
 
+		/* Set the transmit power :
+		 * power - parameter to be set to configure the tx power
+		 * TX power in 0.1dBm steps, for example the value of 10 is 1dBm and 55 is 5.5dBm*/
+		//gecko_cmd_system_set_tx_power(-200);
+
 		/* Start general advertising and enable connections. */
 		gecko_cmd_le_gap_set_mode(le_gap_general_discoverable, le_gap_undirected_connectable);
+
+		//gecko_cmd_hardware_set_soft_timer(32768, TEMP_TIMER, false);
+
+		memset(sensor_data_buffer_dummy, 0, READ_SIZE);
+
+		connected = 0;
 
 		break;
 
@@ -229,9 +248,9 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		}
 
 		connected = 0;
-		gecko_cmd_hardware_set_soft_timer(32768, ALARM_TIMER, false);
+		//gecko_cmd_hardware_set_soft_timer(32768, ALARM_TIMER, false);
 
-		gecko_cmd_hardware_set_soft_timer(TIMER_STOP, LED_TIMER, false);
+		//gecko_cmd_hardware_set_soft_timer(TIMER_STOP, LED_TIMER, false);
 
 		GPIO_PinOutClear(gpioPortF, 4);
 
@@ -246,6 +265,12 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		connected = 1;
 
 		gecko_cmd_hardware_set_soft_timer(32768, LED_TIMER, false);
+
+		//gecko_cmd_hardware_set_soft_timer(32768, TEMP_TIMER, false);
+
+		gecko_cmd_hardware_set_soft_timer(32768, HUMIDITY_TIMER, false);
+
+		slave_connection = evt->data.evt_le_connection_opened.connection;
 
 		break;
 
@@ -282,12 +307,45 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 			advSetup();
 			break;
 		case TEMP_TIMER: /* Temperature measurement timer */
+#if defined(SEND_FLEX_SENSOR_DATA_INSTEAD_OF_TEMP_DATA)
+			while(i < READ_SIZE)
+			{
+				if (sensor_data_buffer[i] == sensor_data_buffer_dummy[i])
+				{
+					is_leuart_data_available = false;
+					break;
+				}
+				i++;
+			}
+
+			if (i == READ_SIZE)
+			{
+				is_leuart_data_available = true;
+			}
+
+			i = 0;
+
 			if (is_leuart_data_available == true)
 			{
 				/* Make a temperature measurement */
 				htmTemperatureMeasure();
 				is_leuart_data_available = false;
 			}
+#else
+			htmTemperatureMeasure();
+#endif
+			break;
+		case HUMIDITY_TIMER:
+			appHwReadHumidity((uint32_t *)&humidityData);
+
+			htmHumidityMeas.humidity = humidityData/1000;
+
+			//htmHumidityMeas.humidity = 45;
+
+			gecko_cmd_gatt_server_write_attribute_value(gattdb_humidity_measurement,
+					0,
+					sizeof(struct htmHumidityMeas_t),
+					(uint8_t *)&htmHumidityMeas);
 			break;
 #ifndef FEATURE_IOEXPANDER
 		case DISP_POL_INV_TIMER:

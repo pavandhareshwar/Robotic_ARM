@@ -11,7 +11,7 @@
       <!--Device Name-->
       <characteristic id="device_name" name="Device Name" sourceId="org.bluetooth.characteristic.gap.device_name" uuid="2a00">
         <informativeText/>
-        <value length="11" type="utf-8" variable_length="false">BGeckoSlave</value>
+        <value length="5" type="utf-8" variable_length="false">PAVAN</value>
         <properties read="true" read_requirement="optional" write="true" write_requirement="optional"/>
       </characteristic>
       
@@ -36,7 +36,7 @@
     </service>
     
     <!--Health Thermometer-->
-    <service advertise="true" name="Health Thermometer" requirement="mandatory" sourceId="org.bluetooth.service.health_thermometer" type="primary" uuid="1809">
+    <service advertise="false" name="Health Thermometer" requirement="mandatory" sourceId="org.bluetooth.service.health_thermometer" type="secondary" uuid="1809">
       <informativeText>Abstract: The Health Thermometer service exposes temperature and other data from a thermometer intended for healthcare and fitness applications. Summary: The Health Thermometer service is instantiated as a Primary Service. There are one or more instantiations of the Health Thermometer service per device claiming conformance with this specification. </informativeText>
       
       <!--Temperature Measurement-->
@@ -78,18 +78,6 @@
       </characteristic>
     </service>
     
-    <!--Link Loss-->
-    <service advertise="true" name="Link Loss" requirement="mandatory" sourceId="org.bluetooth.service.link_loss" type="primary" uuid="1803">
-      <informativeText>Custom service</informativeText>
-      
-      <!--Alert Level-->
-      <characteristic id="xgatt_loss" name="Alert Level" sourceId="org.bluetooth.service.alert_level" uuid="2A06">
-        <informativeText>Custom characteristic</informativeText>
-        <value length="1" type="hex" variable_length="false">1</value>
-        <properties read="true" read_requirement="optional" write="true" write_requirement="optional"/>
-      </characteristic>
-    </service>
-    
     <!--Environmental Sensing-->
     <service advertise="true" name="Environmental Sensing" requirement="mandatory" sourceId="org.bluetooth.service.environmental_sensing" type="primary" uuid="181A">
       <informativeText>Custom service</informativeText>
@@ -98,7 +86,7 @@
       <characteristic id="humidity_measurement" name="Humidity Measurement" sourceId="org.bluetooth.characteristic.humidity" uuid="2A6F">
         <informativeText>Custom characteristic</informativeText>
         <value length="2" type="utf-8" variable_length="false"/>
-        <properties read="true" read_requirement="optional"/>
+        <properties indicate="true" indicate_requirement="optional" read="true" read_requirement="optional"/>
       </characteristic>
     </service>
   </gatt>

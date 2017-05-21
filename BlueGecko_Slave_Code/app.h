@@ -44,9 +44,13 @@ extern "C" {
 #define READ_SIZE	4
 
 uint8_t sensor_data_buffer[READ_SIZE];
+uint8_t sensor_data_buffer_dummy[READ_SIZE];
+
 
 bool is_leuart_data_available;
 uint8_t leuart_rx_data_count;
+
+uint8_t slave_connection;
 
 /***************************************************************************************************
   Function Declarations
