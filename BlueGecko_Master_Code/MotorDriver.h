@@ -27,11 +27,14 @@ float LFAselfcal;
 int flag;
 static int sleep_block_counter[4] 		= {0,0,0,0};
 
-#define LED0Port 						gpioPortF
+#define LEDPort 						gpioPortF
 #define LED0Pin 						4
-#define LED1Port 						gpioPortF
 #define LED1Pin 						5
-
+#define MotorPort						gpioPortA
+#define Motor0Pin0						0						/*Positive of Motor0*/
+#define Motor0Pin1						1						/*Negative of Motor0*/
+#define Motor1Pin0						2						/*Positive of Motor1*/
+#define Motor1Pin1						3						/*Negative of Motor1*/
 
 void parse_flex_sensor_data(uint32_t value);
 

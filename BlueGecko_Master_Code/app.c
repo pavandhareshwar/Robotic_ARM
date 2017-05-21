@@ -650,7 +650,8 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 			if (evt->data.evt_gatt_characteristic_value.att_opcode == gatt_handle_value_notification)
 			{
 				memcpy(temp_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
-				int temp_data = ((temp_rcvd_data[4] << 24 | temp_rcvd_data[3] << 16 | temp_rcvd_data[2] << 8 | temp_rcvd_data[1]) & 0x00FFFFFF);
+				//int temp_data = ((temp_rcvd_data[4] << 24 | temp_rcvd_data[3] << 16 | temp_rcvd_data[2] << 8 | temp_rcvd_data[1]) & 0x00FFFFFF);
+				int temp_data = ((temp_rcvd_data[4] << 24 | temp_rcvd_data[3] << 16 | temp_rcvd_data[2] << 8 | temp_rcvd_data[1])~);
 				float temp_val = (float)temp_data/1000;
 
 #ifdef READ_FLEX_SENSOR_DATA

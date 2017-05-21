@@ -2,7 +2,7 @@
  * MotorDriver.c
  *
  *  Created on: May 1, 2017
- *      Author: sharatrp
+ *      Author: Sharatrp
  */
 
 #include <stdint.h>
@@ -138,8 +138,16 @@ void timersDisable(void)
  ******************************************************************/
 void ledON(int LED_number)
 {
-	if(LED_number == 0) GPIO_PinOutSet(LED0Port, LED0Pin);
-	else GPIO_PinOutSet(LED1Port, LED1Pin);
+	switch (LED_number)
+	{
+	case 0:
+		GPIO_PinOutSet(LEDPort, LED0Pin);
+		break;
+
+	case 1:
+		GPIO_PinOutSet(LEDPort, LED1Pin);
+		break;
+	}
 }
 
 /******************************************************************
@@ -153,8 +161,16 @@ void ledON(int LED_number)
  ******************************************************************/
 void ledOFF(int LED_number)
 {
-	if(LED_number == 0) GPIO_PinOutClear(LED0Port, LED0Pin);
-	else GPIO_PinOutClear(LED1Port, LED1Pin);
+	switch (LED_number)
+	{
+	case 0:
+		GPIO_PinOutClear(LEDPort, LED0Pin);
+		break;
+
+	case 1:
+		GPIO_PinOutClear(LEDPort, LED1Pin);
+		break;
+	}
 }
 
 /******************************************************************
@@ -377,7 +393,7 @@ void parse_flex_sensor_data(uint32_t value)
 	for(i = 24; i >= 0; i -= 8)
 	{
 		idx = (((value >> i) & 0xC0) >> 6);
-		flex_sensor_data[idx] = ((value >> i) & 0xC0);
+		flex_sensor_data[idx] = ((value >> i) & 0x3F);
 	}
 
 	/* Mapping the flex sensor data received to a single value
@@ -386,9 +402,9 @@ void parse_flex_sensor_data(uint32_t value)
 	{
 		if ((flex_sensor_data[j] >= 0) && (flex_sensor_data[j] <= 5))
 			flex_sensor_data[j] = 3;
-		else if ((flex_sensor_data[j] > 5) && (flex_sensor_data[j] <= 10))
+		else if ((flex_sensor_data[j] > 5) && (flex_sensor_data[j] <= 8))
 			flex_sensor_data[j] = 2;
-		else if ((flex_sensor_data[j] > 10) && (flex_sensor_data[j] <= 15))
+		else if ((flex_sensor_data[j] > 12) && (flex_sensor_data[j] <= 15))
 			flex_sensor_data[j] = 1;
 		else
 			flex_sensor_data[j] = 0;
@@ -421,82 +437,63 @@ void timerSetup(uint32_t topVal)
 
 void motor_control(void)
 {
-	if (flex_sensor_data[0] > flex_sensor_data[1])
-		motor_out[0] = flex_sensor_data[0] - flex_sensor_data[1];
-	else if (flex_sensor_data[1] > flex_sensor_data[0])
-		motor_out[0] = flex_sensor_data[1] - flex_sensor_data[0];
-	else
-		motor_out[0] = flex_sensor_data[0] - flex_sensor_data[1];
+	uint8_t choice1 = (flex_sensor_data[0] >= flex_sensor_data[1]) ? ((flex_sensor_data[0] == flex_sensor_data[1]) ? 2 : 0) : 1;
+	uint8_t choice2 = (flex_sensor_data[2] >= flex_sensor_data[3]) ? ((flex_sensor_data[2] == flex_sensor_data[3]) ? 2 : 0) : 1;
 
-	if (flex_sensor_data[2] > flex_sensor_data[3])
-		motor_out[1] = flex_sensor_data[2] - flex_sensor_data[3];
-	else if (flex_sensor_data[3] > flex_sensor_data[2])
-		motor_out[1] = flex_sensor_data[3] - flex_sensor_data[2];
-	else
-		motor_out[1] = flex_sensor_data[2] - flex_sensor_data[3];
+	GPIO_PinModeSet(MotorPort, Motor0Pin0, gpioModePushPull, 0);
+	GPIO_PinModeSet(MotorPort, Motor0Pin1, gpioModePushPull, 0);
+	GPIO_PinModeSet(MotorPort, Motor1Pin0, gpioModePushPull, 0);
+	GPIO_PinModeSet(MotorPort, Motor1Pin1, gpioModePushPull, 0);
+	GPIO_DriveStrengthSet(MotorPort, gpioDriveStrengthStrong);
 
-	if (motor_out[0] > 0)
+	/* PA0 and PA1 */
+	switch (choice1)
 	{
-		/* PA0 and PA1 */
-		//GPIO_PinOutSet(LED0Port, LED0Pin);
-		GPIO_PinModeSet(gpioPortA, 0, gpioModePushPull, 1);
-		GPIO_PinModeSet(gpioPortA, 1, gpioModePushPull, 1);
-		GPIO_DriveStrengthSet(gpioPortA, GPIO_P_CTRL_DRIVESTRENGTH_STRONG);
-		GPIO_PinOutSet(gpioPortA, 0);
-		GPIO_PinOutClear(gpioPortA, 1);
-	}
-	else if (motor_out[0] < 0)
-	{
-		/* PA0 and PA1 */
-		//GPIO_PinOutSet(LED0Port, LED0Pin);
-		GPIO_PinModeSet(gpioPortA, 0, gpioModePushPull, 1);
-		GPIO_PinModeSet(gpioPortA, 1, gpioModePushPull, 1);
-		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
-		GPIO_PinOutSet(gpioPortA, 1);
-		GPIO_PinOutClear(gpioPortA, 0);
-	}
-	else
-	{
-		//GPIO_PinOutClear(LED0Port, LED0Pin);
-		/* PA0 and PA1 */
-		//GPIO_PinOutSet(LED0Port, LED0Pin);
-		GPIO_PinModeSet(gpioPortA, 0, gpioModePushPull, 1);
-		GPIO_PinModeSet(gpioPortA, 1, gpioModePushPull, 1);
-		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
-		GPIO_PinOutClear(gpioPortA, 0);
-		GPIO_PinOutClear(gpioPortA, 1);
+
+	/*Sensor0 value greater than Sensor1. Motor clockwise*/
+	case 0:
+		GPIO_PinOutSet(MotorPort, 0);
+		GPIO_PinOutClear(MotorPort, 1);
+		break;
+
+	/*Sensor1 value greater than Sensor0. Motor counter clockwise*/
+	case 1:
+		GPIO_PinOutSet(MotorPort, 1);
+		GPIO_PinOutClear(MotorPort, 0);
+		break;
+
+	/*Sensor 0,1 values similar*/
+	default:
+		GPIO_PinOutClear(LEDPort, LED0Pin);
+		GPIO_PinOutClear(LEDPort, LED1Pin);
+//		GPIO_PinOutSet(LEDPort, LED0Pin);
+		GPIO_PinOutClear(MotorPort, 0);
+		GPIO_PinOutClear(MotorPort, 1);
+		break;
 	}
 
-	if (motor_out[1] > 0)
+	/* PA2 and PA3 */
+	switch (choice2)
 	{
-		/* PA2 and PA3 */
-		//GPIO_PinOutSet(LED0Port, LED0Pin);
-		GPIO_PinModeSet(gpioPortA, 2, gpioModePushPull, 1);
-		GPIO_PinModeSet(gpioPortA, 3, gpioModePushPull, 1);
-		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
-		GPIO_PinOutSet(gpioPortA, 2);
-		GPIO_PinOutClear(gpioPortA, 3);
-	}
-	else if (motor_out[1] < 0)
-	{
-		/* PA2 and PA3 */
-		//GPIO_PinOutSet(LED0Port, LED0Pin);
-		GPIO_PinModeSet(gpioPortA, 2, gpioModePushPull, 1);
-		GPIO_PinModeSet(gpioPortA, 3, gpioModePushPull, 1);
-		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
-		GPIO_PinOutSet(gpioPortA, 3);
-		GPIO_PinOutClear(gpioPortA, 2);
-	}
-	else
-	{
-		//GPIO_PinOutClear(LED1Port, LED1Pin);
-		/* PA2 and PA3 */
-		//GPIO_PinOutSet(LED0Port, LED0Pin);
-		GPIO_PinModeSet(gpioPortA, 2, gpioModePushPull, 1);
-		GPIO_PinModeSet(gpioPortA, 3, gpioModePushPull, 1);
-		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
-		GPIO_PinOutClear(gpioPortA, 2);
-		GPIO_PinOutClear(gpioPortA, 3);
-	}
 
+	/*Sensor2 value greater than Sensor3. Motor clockwise*/
+	case 0:
+		GPIO_PinOutSet(MotorPort, 2);
+		GPIO_PinOutClear(MotorPort, 3);
+		break;
+
+	/*Sensor3 value greater than Sensor2. Motor counter clockwise*/
+	case 1:
+		GPIO_PinOutSet(MotorPort, 3);
+		GPIO_PinOutClear(MotorPort, 2);
+		break;
+
+	/*Sensor 2,3 values similar*/
+	default:
+		GPIO_PinOutClear(LEDPort, LED0Pin);
+		GPIO_PinOutClear(LEDPort, LED1Pin);
+//		GPIO_PinOutSet(LEDPort, LED1Pin);
+		GPIO_PinOutClear(MotorPort, 2);
+		GPIO_PinOutClear(MotorPort, 3);
+	}
 }
