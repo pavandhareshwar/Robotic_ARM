@@ -58,9 +58,14 @@ typedef enum
    * Timer for toggling the the EXTCOMIN signal, which prevents building up a DC bias
    within the Sharp memory LCD panel */
   DISP_POL_INV_TIMER,
-  /* */
-  CONNECTED_TIMER,
+  /** Slave Role Timer
+   *  This is an auto-reload timer used for timing device role as a slave. */
+  SLAVE_ROLE_TIMER,
+  /** Master Role Timer
+   *  This is an auto-reload timer used for timing device role as a master. */
   MASTER_ROLE_TIMER,
+  /** Master Slave Role Reversal Timer
+   *  This is an auto-reload timer used for switching device role as master and slave. */
   MASTER_SLAVE_RR_TIMER
 } appTimer_t;
 

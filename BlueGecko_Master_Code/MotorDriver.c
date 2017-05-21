@@ -325,7 +325,7 @@ void timersSetup()
 }
 
 
-void ULFRCOCalibrate()
+void ULFRCOCalibrate(void)
 {
 	flag = 1;
 	int energymode =3;
@@ -395,6 +395,30 @@ void parse_flex_sensor_data(uint32_t value)
 	}
 }
 
+void timerSetup(uint32_t topVal)
+{
+	const TIMER_Init_TypeDef timer0Init =        // Setup Timer initialization
+			{
+			.enable = false,                  	// Start timer upon configuration
+			.debugRun = false,  				// Keep timer running even on debug halt
+			.prescale = timerPrescale1, 		// Use /1 prescaler...timer clock = HF clock = 1 MHz
+			.clkSel = timerClkSelHFPerClk, 		// Set HF peripheral clock as clock source
+			.fallAction = timerInputActionNone, // No action on falling edge
+			.riseAction = timerInputActionNone, // No action on rising edge
+			.mode = timerModeUp,              	// Use up-count mode
+			.dmaClrAct = false,                 // Not using DMA
+			.quadModeX4 = false,               	// Not using quad decoder
+			.oneShot = true,          			// Using continuous, not one-shot
+			.sync = false, 						// Synchronizing timer operation on of other timers
+			};
+
+	TIMER0->TOP = topVal;
+
+	TIMER_Init(TIMER0, &timer0Init);
+
+	TIMER_Enable(TIMER0, true);
+}
+
 void motor_control(void)
 {
 	if (flex_sensor_data[0] > flex_sensor_data[1])
@@ -413,32 +437,66 @@ void motor_control(void)
 
 	if (motor_out[0] > 0)
 	{
-		GPIO_PinOutSet(LED0Port, LED0Pin);
+		/* PA0 and PA1 */
+		//GPIO_PinOutSet(LED0Port, LED0Pin);
+		GPIO_PinModeSet(gpioPortA, 0, gpioModePushPull, 1);
+		GPIO_PinModeSet(gpioPortA, 1, gpioModePushPull, 1);
+		GPIO_DriveStrengthSet(gpioPortA, GPIO_P_CTRL_DRIVESTRENGTH_STRONG);
+		GPIO_PinOutSet(gpioPortA, 0);
+		GPIO_PinOutClear(gpioPortA, 1);
 	}
 	else if (motor_out[0] < 0)
 	{
-		GPIO_PinOutClear(LED0Port, LED0Pin);
+		/* PA0 and PA1 */
+		//GPIO_PinOutSet(LED0Port, LED0Pin);
+		GPIO_PinModeSet(gpioPortA, 0, gpioModePushPull, 1);
+		GPIO_PinModeSet(gpioPortA, 1, gpioModePushPull, 1);
+		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
+		GPIO_PinOutSet(gpioPortA, 1);
+		GPIO_PinOutClear(gpioPortA, 0);
 	}
 	else
-		GPIO_PinOutClear(LED0Port, LED0Pin);
+	{
+		//GPIO_PinOutClear(LED0Port, LED0Pin);
+		/* PA0 and PA1 */
+		//GPIO_PinOutSet(LED0Port, LED0Pin);
+		GPIO_PinModeSet(gpioPortA, 0, gpioModePushPull, 1);
+		GPIO_PinModeSet(gpioPortA, 1, gpioModePushPull, 1);
+		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
+		GPIO_PinOutClear(gpioPortA, 0);
+		GPIO_PinOutClear(gpioPortA, 1);
+	}
 
 	if (motor_out[1] > 0)
 	{
-		GPIO_PinOutSet(LED1Port, LED1Pin);
+		/* PA2 and PA3 */
+		//GPIO_PinOutSet(LED0Port, LED0Pin);
+		GPIO_PinModeSet(gpioPortA, 2, gpioModePushPull, 1);
+		GPIO_PinModeSet(gpioPortA, 3, gpioModePushPull, 1);
+		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
+		GPIO_PinOutSet(gpioPortA, 2);
+		GPIO_PinOutClear(gpioPortA, 3);
 	}
 	else if (motor_out[1] < 0)
 	{
-		GPIO_PinOutClear(LED1Port, LED1Pin);
+		/* PA2 and PA3 */
+		//GPIO_PinOutSet(LED0Port, LED0Pin);
+		GPIO_PinModeSet(gpioPortA, 2, gpioModePushPull, 1);
+		GPIO_PinModeSet(gpioPortA, 3, gpioModePushPull, 1);
+		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
+		GPIO_PinOutSet(gpioPortA, 3);
+		GPIO_PinOutClear(gpioPortA, 2);
 	}
 	else
-		GPIO_PinOutClear(LED1Port, LED1Pin);
-
-}
-
-void LETIMER0_IRQHandler(void)
-{
-	if((LETIMER0->IF & LETIMER_IF_COMP1) == LETIMER_IF_COMP1)              //COMP1 enabled
 	{
-
+		//GPIO_PinOutClear(LED1Port, LED1Pin);
+		/* PA2 and PA3 */
+		//GPIO_PinOutSet(LED0Port, LED0Pin);
+		GPIO_PinModeSet(gpioPortA, 2, gpioModePushPull, 1);
+		GPIO_PinModeSet(gpioPortA, 3, gpioModePushPull, 1);
+		GPIO_DriveStrengthSet(gpioPortA, gpioDriveStrengthStrongAlternateStrong);
+		GPIO_PinOutClear(gpioPortA, 2);
+		GPIO_PinOutClear(gpioPortA, 3);
 	}
+
 }

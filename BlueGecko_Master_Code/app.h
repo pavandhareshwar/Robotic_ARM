@@ -31,6 +31,7 @@ extern "C" {
  * @{
  **************************************************************************************************/
 
+//#define ENABLE_PERIODIC_ROLE_REVERSAL
 
 /***************************************************************************************************
   Type Definitions
@@ -46,6 +47,16 @@ typedef enum _connState{
 	eStateDataMode,
 	eStateMax
 }connState;
+
+typedef enum
+{
+	DEVICE_ROLE_INVALID,
+	DEVICE_ROLE_MASTER,
+	DEVICE_ROLE_SLAVE,
+	DEVICE_ROLE_MAX
+}device_role;
+
+uint8_t slave_connection;
 
 /***************************************************************************************************
   Function Declarations

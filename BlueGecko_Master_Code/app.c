@@ -41,16 +41,11 @@
 
 /* Own header */
 #include "app.h"
+#include "MotorDriver.h"
 
 bd_addr slave_bluetooth_addr;
 uint8_t slave_bluetooth_addr_type = 0;
 uint8_t slave_conn_handle = 0;
-uint32 slave_service_handle = 0;
-uint8array slave_service_uuid;
-uint16 slave_characteristic_handle = 0;
-uint8 slave_characteristic_connection = 0;
-uint8 slave_characteristic_properties = 0;
-uint8array slave_characteristic_uuid;
 uint8 connection;
 uint16 interval;
 uint16 latency;
@@ -66,6 +61,14 @@ uint8array humidity_char_uuid;
 uint8_t slave_addr_to_match[] = {0x00, 0x0B, 0x57, 0x05, 0xE0, 0xD7};
 bool slave_addr_match = false;
 
+device_role e_dev_role = DEVICE_ROLE_INVALID;
+
+uint32_t first_time_advertisement = 1;
+
+int master_role_led_status = 0;
+int slave_role_led_status = 0;
+int connected = 0;
+
 #if 0
 uint8_t temp_service_uuid_string[5];
 #endif
@@ -74,11 +77,51 @@ bool service_handling_in_progress = false;
 
 static connState state = eStateDisconnected;
 
-uint8 char_rcvd_data;
+uint8 humid_rcvd_data[10];
 uint8 temp_rcvd_data[20];
 
-//#define MEASURE_HUMIDITY
-#define MEASURE_TEMPERATURE
+#define ENABLE_MASTER_ROLE
+//#define ENABLE_SLAVE_ROLE
+
+#ifdef ENABLE_SLAVE_ROLE
+#define MEASURE_ONBOARD_HUMIDITY
+#define MEASURE_ONBOARD_TEMPERATURE
+#endif
+
+#ifdef ENABLE_MASTER_ROLE
+//#define READ_FLEX_SENSOR_DATA
+//#define MEASURE_TEMPERATURE
+#define MEASURE_HUMIDITY
+#endif
+
+#if defined(ENABLE_MASTER_ROLE) && defined(ENABLE_SLAVE_ROLE)
+#define ENABLE_PERIODIC_ROLE_REVERSAL
+#define DEV_SLAVE_PERIOD	327680*2			/* Defines the period for which the blue gecko remains in master/slave mode */
+#endif
+
+#if defined(MEASURE_TEMPERATURE)
+uint32 slave_temp_service_handle = 0;
+uint8array slave_temp_service_uuid;
+uint16 slave_temp_characteristic_handle = 0;
+uint8 slave_temp_characteristic_connection = 0;
+uint8 slave_temp_characteristic_properties = 0;
+uint8array slave_temp_characteristic_uuid;
+#endif
+
+#if defined(MEASURE_HUMIDITY)
+uint32 slave_humid_service_handle = 0;
+uint8array slave_humid_service_uuid;
+uint16 slave_humid_characteristic_handle = 0;
+uint8 slave_humid_characteristic_connection = 0;
+uint8 slave_humid_characteristic_properties = 0;
+uint8array slave_humid_characteristic_uuid;
+#endif
+
+int device_role_in_conn = -1;
+bool device_is_slave = false;
+bool slave_initialized = false;
+bool master_initialized = false;
+int gatt_proc_completed_res = -1;
 
 /***********************************************************************************************//**
  * @addtogroup Application
@@ -145,6 +188,7 @@ void appInit(void)
   //htmInit();
 }
 
+#if 0
 /***********************************************************************************************//**
  * \brief Function that decodes the advertising data
  **************************************************************************************************/
@@ -191,6 +235,47 @@ static void format_bluetooth_address(uint8_t *pBluetoothAddr, uint8_t *pBluetoot
 
 	return;
 }
+#endif
+
+#if defined(ENABLE_SLAVE_ROLE) || defined(ENABLE_MASTER_ROLE)
+void manage_master_slave_role_led(void)
+{
+	if (e_dev_role == DEVICE_ROLE_MASTER)
+	{
+		if (master_role_led_status == 0)
+		{
+			GPIO_PinOutSet(gpioPortF, 5);
+			master_role_led_status = 1;
+			gecko_cmd_hardware_set_soft_timer(3276, MASTER_ROLE_TIMER, false);
+		}
+		else
+		{
+			GPIO_PinOutClear(gpioPortF, 5);
+			master_role_led_status = 0;
+			gecko_cmd_hardware_set_soft_timer(32768, MASTER_ROLE_TIMER, false);
+		}
+	}
+	else if (e_dev_role == DEVICE_ROLE_SLAVE)
+	{
+		if (slave_role_led_status == 0)
+		{
+			GPIO_PinOutSet(gpioPortF, 4);
+			slave_role_led_status = 1;
+			gecko_cmd_hardware_set_soft_timer(3276, SLAVE_ROLE_TIMER, false);
+		}
+		else
+		{
+			GPIO_PinOutClear(gpioPortF, 4);
+			slave_role_led_status = 0;
+			gecko_cmd_hardware_set_soft_timer(32768, SLAVE_ROLE_TIMER, false);
+		}
+	}
+	else
+	{
+		/* Do Nothing */
+	}
+}
+#endif
 
 /***********************************************************************************************//**
  * \brief Event handler function
@@ -200,6 +285,10 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 {
 	/* Flag for indicating DFU Reset must be performed */
 	static uint8_t boot_to_dfu = 0;
+
+#if defined(ENABLE_SLAVE_ROLE) && defined(MEASURE_ONBOARD_HUMIDITY)
+	int humidityData; /* Humidity data from the sensor */
+#endif
 
 	switch (BGLIB_MSG_ID(evt->header)) {
 
@@ -217,6 +306,37 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 
 		/* LED0 - Power LED */
 		//GPIO_PinModeSet(gpioPortF, 4, gpioModePushPull, 0);
+
+#ifdef ENABLE_SLAVE_ROLE
+		e_dev_role = DEVICE_ROLE_SLAVE;
+
+		gecko_cmd_hardware_set_soft_timer(32768, SLAVE_ROLE_TIMER, false);
+
+		/* Hardware initialization. Initializes temperature sensor. */
+		appHwInit();
+#endif
+
+#ifdef ENABLE_MASTER_ROLE
+		e_dev_role = DEVICE_ROLE_MASTER;
+		gecko_cmd_hardware_set_soft_timer(32768, MASTER_ROLE_TIMER, false);
+#endif
+
+#ifdef ENABLE_PERIODIC_ROLE_REVERSAL
+		gecko_cmd_hardware_set_soft_timer(49152, MASTER_SLAVE_RR_TIMER, true); /* Timer will expire in 1.5 seconds */
+#endif
+
+#ifdef ENABLE_SLAVE_ROLE
+		/* LED0 - Power LED */
+		GPIO_PinModeSet(gpioPortF, 4, gpioModePushPull, 0);
+#endif
+
+#ifdef ENABLE_MASTER_ROLE
+		/* LED1 - Alarm LED */
+		GPIO_PinModeSet(gpioPortF, 5, gpioModePushPull, 0);
+#endif
+
+		/* For the first 1.5 seconds, the device will be in master mode and
+		 * and will scan for advertising packets from any slave */
 
 		/* start the GAP discovery procedure to scan for advertising devices */
 		/* Configure the scanning parameters */
@@ -270,11 +390,12 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 			{
 				memcpy(slave_bluetooth_addr.addr, evt->data.evt_le_gap_scan_response.address.addr, sizeof(bd_addr));
 
-			slave_bluetooth_addr_type = evt->data.evt_le_gap_scan_response.address_type;
-			gecko_cmd_le_gap_open(slave_bluetooth_addr, slave_bluetooth_addr_type);
-		}
+				slave_bluetooth_addr_type = evt->data.evt_le_gap_scan_response.address_type;
+				gecko_cmd_le_gap_open(slave_bluetooth_addr, slave_bluetooth_addr_type);
+			}
 #else
 			/* Device is set in active scan mode, so checking for scan response */
+			//if (evt->data.evt_le_gap_scan_response.packet_type == 0x04 && state != eStateFindService)
 			if (evt->data.evt_le_gap_scan_response.packet_type == 0x04)
 			{
 				state = eStateScanning;
@@ -291,56 +412,88 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 				gecko_cmd_le_gap_open(slave_bluetooth_addr, slave_bluetooth_addr_type);
 			}
 #endif
-		break;
+			break;
 
-		/* Connection opened event */
+			/* Connection opened event */
 	case gecko_evt_le_connection_opened_id:
 		/* Call advertisement.c connection started callback */
 		//advConnectionStarted();
 		/* Connection Open Event */
-		if (NULL != evt->data.evt_le_connection_opened.address.addr
-				&& NULL != slave_bluetooth_addr.addr)
-		{
-			if (memcmp(evt->data.evt_le_connection_opened.address.addr,
-					slave_bluetooth_addr.addr, sizeof(bd_addr)) == 0)
-			{
-				slave_conn_handle = evt->data.evt_le_connection_opened.connection;
+		connected = 1;
 
-				/* Discover all the primary services defined in the
-				 * GATT database for the slave identified by the
-				 * newly acquired connection handle */
+		device_role_in_conn = evt->data.evt_le_connection_opened.master;
+
+		if (device_role_in_conn == 0)
+		{
+			/* Blue Gecko device is slave in this connection */
+			device_is_slave = true;
+		}
+		else
+		{
+			/* Blue Gecko device is master in this connection */
+			device_is_slave = false;
+		}
+
+		if (e_dev_role == DEVICE_ROLE_SLAVE)
+		{
+#ifdef ENABLE_SLAVE_ROLE
+			slave_connection = evt->data.evt_le_connection_opened.connection;
+#endif
+
+#ifdef MEASURE_ONBOARD_HUMIDITY
+			gecko_cmd_hardware_set_soft_timer(32768, HUMIDITY_TIMER, false);
+#endif
+
+#ifdef MEASURE_ONBOARD_TEMPERATURE
+			gecko_cmd_hardware_set_soft_timer(32768, TEMP_TIMER, true);
+#endif
+
+		}
+		else
+		{
+			//if (NULL != evt->data.evt_le_connection_opened.address.addr && NULL != slave_bluetooth_addr.addr && state == eStateScanning)
+			if (NULL != evt->data.evt_le_connection_opened.address.addr && NULL != slave_bluetooth_addr.addr)
+			{
+				if (memcmp(evt->data.evt_le_connection_opened.address.addr,
+						slave_bluetooth_addr.addr, sizeof(bd_addr)) == 0)
+				{
+					slave_conn_handle = evt->data.evt_le_connection_opened.connection;
+
+					/* Discover all the primary services defined in the
+					 * GATT database for the slave identified by the
+					 * newly acquired connection handle */
 
 #ifdef MEASURE_TEMPERATURE
-				/* Discover temperature measurement service -
-				 * with temperature value and type as characteristic */
-				temp_service_uuid.len = 2;
-				temp_service_uuid.data[0] = 0x09;
-				temp_service_uuid.data[1] = 0x18;
+					/* Discover temperature measurement service -
+					 * with temperature value and type as characteristic */
+					temp_service_uuid.len = 2;
+					temp_service_uuid.data[0] = 0x09;
+					temp_service_uuid.data[1] = 0x18;
 
-				struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_temp_pri_serv_rsp =
-						gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, temp_service_uuid.len,
-								temp_service_uuid.data);
+					struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_temp_pri_serv_rsp =
+							gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, temp_service_uuid.len,
+									temp_service_uuid.data);
 #endif
 
 #ifdef MEASURE_HUMIDITY
-				service_handling_in_progress = true;
+					//service_handling_in_progress = true;
 
-				/* Discover environmental sensing service - with humidity info as characteristic */
-				env_service_uuid.len = 2;
-				env_service_uuid.data[0] = 0x1A;
-				env_service_uuid.data[1] = 0x18;
-				struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_env_pri_serv_rsp =
-						gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, env_service_uuid.len,
-								env_service_uuid.data);
+					/* Discover environmental sensing service - with humidity info as characteristic */
+					env_service_uuid.len = 2;
+					env_service_uuid.data[0] = 0x1A;
+					env_service_uuid.data[1] = 0x18;
+					struct gecko_msg_gatt_discover_primary_services_by_uuid_rsp_t *disc_env_pri_serv_rsp =
+							gecko_cmd_gatt_discover_primary_services_by_uuid(slave_conn_handle, env_service_uuid.len,
+									env_service_uuid.data);
 
-				//uint16 disc_env_pri_serv_rsp_result = disc_env_pri_serv_rsp->result;
+					uint16 disc_env_pri_serv_rsp_result = disc_env_pri_serv_rsp->result;
 #endif
 
-				//gecko_cmd_gatt_discover_primary_services(slave_conn_handle);
-				state = eStateFindService;
+					//gecko_cmd_gatt_discover_primary_services(slave_conn_handle);
+					state = eStateFindService;
+				}
 			}
 		}
-
 		break;
 
 	case gecko_evt_le_connection_parameters_id:
@@ -354,11 +507,107 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		break;
 
 	case gecko_evt_gatt_service_id:
+#ifdef MEASURE_TEMPERATURE
 		/* This event is triggered when a service is discovered from the remote GATT database */
-		slave_service_handle = evt->data.evt_gatt_service.service;
-		service_handling_in_progress = false;
+		if (memcmp(evt->data.evt_gatt_service.uuid.data,temp_service_uuid.data,
+				evt->data.evt_gatt_service.uuid.len) == 0)
+		{
+			/* Temperature service discovered */
+			slave_temp_service_handle = evt->data.evt_gatt_service.service;
+			service_handling_in_progress = false;
+		}
+#endif
+
+#ifdef MEASURE_HUMIDITY
+		if (memcmp(evt->data.evt_gatt_service.uuid.data,env_service_uuid.data,
+				evt->data.evt_gatt_service.uuid.len) == 0)
+		{
+			/* Humidity Service discovered */
+			slave_humid_service_handle = evt->data.evt_gatt_service.service;
+			service_handling_in_progress = false;
+		}
+#endif
 
 		//gecko_cmd_le_gap_end_procedure();
+
+		break;
+
+	case gecko_evt_gatt_procedure_completed_id:
+		gatt_proc_completed_res = evt->data.evt_gatt_procedure_completed.result;
+
+		/* This event is triggered when a GATT procedure finished successfully or failed with error */
+		if ( state == eStateFindService )
+		{
+#ifdef MEASURE_TEMPERATURE
+			if (slave_temp_service_handle > 0)
+			{
+				//gecko_cmd_gatt_discover_characteristics(evt->data.evt_gatt_procedure_completed.connection, slave_service_handle);
+				state = eStateFindCharacteristic;
+				/* Discover humidity measurement characteristic */
+				temp_char_uuid.len = 2;
+				temp_char_uuid.data[0] = 0x1C;
+				temp_char_uuid.data[1] = 0x2A;
+				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_temp_val_char_rsp =
+						gecko_cmd_gatt_discover_characteristics_by_uuid(evt->data.evt_gatt_service.connection,
+								slave_temp_service_handle, temp_char_uuid.len, temp_char_uuid.data);
+
+				uint16 disc_temp_val_char_rsp_res = disc_temp_val_char_rsp->result;
+			}
+#endif
+
+#ifdef MEASURE_HUMIDITY
+			if (slave_humid_service_handle > 0)
+			{
+				state = eStateFindCharacteristic;
+				/* Discover humidity measurement characteristic */
+				humidity_char_uuid.len = 2;
+				humidity_char_uuid.data[0] = 0x6F;
+				humidity_char_uuid.data[1] = 0x2A;
+				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_humidity_char_rsp =
+						gecko_cmd_gatt_discover_characteristics_by_uuid(evt->data.evt_gatt_service.connection,
+								slave_humid_service_handle, humidity_char_uuid.len, humidity_char_uuid.data);
+
+				uint16 disc_humidity_char_rsp_res = disc_humidity_char_rsp->result;
+			}
+#endif
+
+			break;
+		}
+
+		if ( state == eStateFindCharacteristic )
+		{
+#ifdef MEASURE_TEMPERATURE
+			if ( slave_temp_characteristic_handle > 0 )
+			{
+				struct gecko_msg_gatt_set_characteristic_notification_rsp_t* temp_set_notif_rsp =
+						gecko_cmd_gatt_set_characteristic_notification(slave_conn_handle,
+								slave_temp_characteristic_handle,gatt_notification);
+
+				state = eStateEnableNotif;
+			}
+#endif
+
+#ifdef MEASURE_HUMIDITY
+			if (slave_humid_characteristic_handle > 0)
+			{
+				struct gecko_msg_gatt_read_characteristic_value_by_uuid_rsp_t* char_read_rsp =
+						gecko_cmd_gatt_read_characteristic_value_by_uuid(slave_conn_handle,
+								slave_humid_service_handle, humidity_char_uuid.len, humidity_char_uuid.data);
+
+				uint16 char_rd_rsp_res = char_read_rsp->result;
+
+				state = eStateEnableNotif;
+			}
+#endif
+			break;
+		}
+
+		if ( state == eStateEnableNotif )
+		{
+			//notifications enabled -> transparent data mode
+			state = eStateDataMode;
+			break;
+		}
 
 		break;
 
@@ -379,13 +628,16 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 #ifdef MEASURE_TEMPERATURE
 		if (memcmp(evt->data.evt_gatt_characteristic.uuid.data, temp_char_uuid.data, temp_char_uuid.len) == 0)
 		{
-			slave_characteristic_handle = evt->data.evt_gatt_characteristic.characteristic;
+			slave_temp_characteristic_handle = evt->data.evt_gatt_characteristic.characteristic;
 		}
 #endif
 
 #ifdef MEASURE_HUMIDITY
-		slave_characteristic_handle = evt->data.evt_gatt_characteristic.characteristic;
-		slave_characteristic_connection = evt->data.evt_gatt_characteristic.connection;
+		if (memcmp(evt->data.evt_gatt_characteristic.uuid.data, humidity_char_uuid.data, humidity_char_uuid.len) == 0)
+		{
+			slave_humid_characteristic_handle = evt->data.evt_gatt_characteristic.characteristic;
+			slave_humid_characteristic_connection = evt->data.evt_gatt_characteristic.connection;
+		}
 		//gecko_cmd_le_gap_end_procedure();
 #endif
 		break;
@@ -393,98 +645,28 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 	case gecko_evt_gatt_characteristic_value_id:
 		//process receiving data
 #ifdef MEASURE_TEMPERATURE
-#if 0
-		if ( (evt->data.evt_gatt_characteristic_value.characteristic == slave_characteristic_handle) &&
-		(evt->data.evt_gatt_characteristic_value.att_opcode == gatt_handle_value_notification))
+		if (evt->data.evt_gatt_characteristic_value.characteristic == slave_temp_characteristic_handle)
 		{
-			//uint8array* rdata = &evt->data.evt_gatt_characteristic_value.value;
-
-			memcpy(temp_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
-			uint8_t length = evt->data.evt_gatt_characteristic_value.value.len;
-			gecko_sleep_for_ms(10);
-		}
-#else
-		if (evt->data.evt_gatt_characteristic_value.att_opcode == gatt_handle_value_notification)
-		{
-			memcpy(temp_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
-			int temp_data = ((temp_rcvd_data[4] << 24 | temp_rcvd_data[3] << 16 | temp_rcvd_data[2] << 8 | temp_rcvd_data[1]) & 0x00FFFFFF);
-			float temp_val = (float)temp_data/1000;
-		}
-#endif
-#endif
-
-#ifdef MEASURE_HUMIDITY
-		memcpy(&char_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, sizeof(char_rcvd_data));
-		uint8_t length = evt->data.evt_gatt_characteristic_value.value.len;
-#endif
-		break;
-
-	case gecko_evt_gatt_procedure_completed_id:
-		/* This event is triggered when a GATT procedure finished successfully or failed with error */
-		if ( state == eStateFindService )
-		{
-			if ( slave_service_handle > 0 )
+			if (evt->data.evt_gatt_characteristic_value.att_opcode == gatt_handle_value_notification)
 			{
-				//gecko_cmd_gatt_discover_characteristics(evt->data.evt_gatt_procedure_completed.connection, slave_service_handle);
-				state = eStateFindCharacteristic;
+				memcpy(temp_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
+				int temp_data = ((temp_rcvd_data[4] << 24 | temp_rcvd_data[3] << 16 | temp_rcvd_data[2] << 8 | temp_rcvd_data[1]) & 0x00FFFFFF);
+				float temp_val = (float)temp_data/1000;
 
-#ifdef MEASURE_TEMPERATURE
-				/* Discover humidity measurement characteristic */
-				temp_char_uuid.len = 2;
-				temp_char_uuid.data[0] = 0x1C;
-				temp_char_uuid.data[1] = 0x2A;
-				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_temp_val_char_rsp =
-						gecko_cmd_gatt_discover_characteristics_by_uuid(evt->data.evt_gatt_service.connection, slave_service_handle,
-								temp_char_uuid.len, temp_char_uuid.data);
-
-				uint16 disc_temp_val_char_rsp_res = disc_temp_val_char_rsp->result;
-#endif
-
-#ifdef MEASURE_HUMIDITY
-				/* Discover humidity measurement characteristic */
-				humidity_char_uuid.len = 2;
-				humidity_char_uuid.data[0] = 0x6F;
-				humidity_char_uuid.data[1] = 0x2A;
-				struct gecko_msg_gatt_discover_characteristics_by_uuid_rsp_t *disc_humidity_char_rsp =
-						gecko_cmd_gatt_discover_characteristics_by_uuid(evt->data.evt_gatt_service.connection, slave_service_handle,
-								humidity_char_uuid.len, humidity_char_uuid.data);
-
-				uint16 disc_humidity_char_rsp_res = disc_humidity_char_rsp->result;
+#ifdef READ_FLEX_SENSOR_DATA
+				parse_flex_sensor_data(temp_data);
+				motor_control();
 #endif
 			}
-			break;
-
 		}
+#endif
 
-		if ( state == eStateFindCharacteristic )
-		{
-			if ( slave_characteristic_handle > 0 )
-			{
 #ifdef MEASURE_HUMIDITY
-				struct gecko_msg_gatt_read_characteristic_value_by_uuid_rsp_t* char_read_rsp =
-						gecko_cmd_gatt_read_characteristic_value_by_uuid(slave_conn_handle,
-								slave_service_handle, humidity_char_uuid.len, humidity_char_uuid.data);
-
-				uint16 char_rd_rsp_res = char_read_rsp->result;
-#endif
-
-#ifdef MEASURE_TEMPERATURE
-				struct gecko_msg_gatt_set_characteristic_notification_rsp_t* temp_set_notif_rsp =
-						gecko_cmd_gatt_set_characteristic_notification(slave_conn_handle, slave_characteristic_handle,gatt_notification);
-#endif
-
-				state = eStateEnableNotif;
-			}
-			break;
-		}
-
-		if ( state == eStateEnableNotif )
+		if (evt->data.evt_gatt_characteristic_value.characteristic == slave_humid_characteristic_handle)
 		{
-			//notifications enabled -> transparent data mode
-			state = eStateDataMode;
-			break;
+			memcpy(humid_rcvd_data, evt->data.evt_gatt_characteristic_value.value.data, evt->data.evt_gatt_characteristic_value.value.len);
 		}
-
+#endif
 		break;
 
 	case gecko_evt_le_connection_closed_id:
@@ -499,9 +681,31 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 			gecko_cmd_system_reset(2);
 		}
 
-		/* Start the GAP discovery */
-		gecko_cmd_le_gap_discover(le_gap_general_discoverable); /* Discover using general discoverable mode */
+		connected = 0;
 
+		device_is_slave = false;
+
+		device_role_in_conn = -1;
+
+		if (e_dev_role == DEVICE_ROLE_SLAVE)
+		{
+
+#ifdef ENABLE_SLAVE_ROLE
+			gecko_cmd_hardware_set_soft_timer(32768, SLAVE_ROLE_TIMER, false);
+
+			/* Restart advertising after client has disconnected */
+			gecko_cmd_le_gap_set_mode(le_gap_general_discoverable, le_gap_undirected_connectable);
+#endif
+		}
+		else
+		{
+#ifdef ENABLE_MASTER_ROLE
+			gecko_cmd_hardware_set_soft_timer(32768, MASTER_ROLE_TIMER, false);
+
+			/* Start the GAP discovery */
+			gecko_cmd_le_gap_discover(le_gap_general_discoverable); /* Discover using general discoverable mode */
+#endif
+		}
 		break;
 
 		/* Software Timer event */
@@ -509,18 +713,101 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 		/* Check which software timer handle is in question */
 		switch (evt->data.evt_hardware_soft_timer.handle) {
 		case UI_TIMER: /* App UI Timer (LEDs, Buttons) */
-			appUiTick();
+			//appUiTick();
 			break;
 		case ADV_TIMER: /* Advertisement Timer */
-			advSetup();
+			//advSetup();
 			break;
 #ifndef FEATURE_IOEXPANDER
 		case DISP_POL_INV_TIMER:
 			/*Toggle the the EXTCOMIN signal, which prevents building up a DC bias  within the
 			 * Sharp memory LCD panel */
-			dispPolarityInvert(0);
+			//dispPolarityInvert(0);
 			break;
 #endif /* FEATURE_IOEXPANDER */
+#ifdef ENABLE_PERIODIC_ROLE_REVERSAL
+		case MASTER_SLAVE_RR_TIMER:
+			if (e_dev_role == DEVICE_ROLE_SLAVE)
+			{
+				/* Set advertising parameters. 100ms advertisement interval. All channels used.
+				 * The first two parameters are minimum and maximum advertising interval, both in
+				 * units of (milliseconds * 1.6). The third parameter '7' sets advertising on all channels. */
+				gecko_cmd_le_gap_set_adv_parameters(160,160,7);
+
+				/* Start general advertising and enable connections. */
+				gecko_cmd_le_gap_set_mode(le_gap_general_discoverable, le_gap_undirected_connectable);
+
+				if (device_is_slave == true && connected == 1)
+				{
+					/* Device is connected to a master (like a cellphone) and
+					 * will continue to stay until a disconnect event occurs */
+					/* Resetting the timer to come and check after 5 seconds */
+					gecko_cmd_hardware_set_soft_timer(DEV_SLAVE_PERIOD/4, MASTER_SLAVE_RR_TIMER, true);
+				}
+				else
+				{
+					e_dev_role = DEVICE_ROLE_MASTER;
+					gecko_cmd_hardware_set_soft_timer(DEV_SLAVE_PERIOD, MASTER_SLAVE_RR_TIMER, true);
+				}
+			}
+			else if (e_dev_role == DEVICE_ROLE_MASTER)
+			{
+				/* start the GAP discovery procedure to scan for advertising devices */
+				/* Configure the scanning parameters */
+				/* scan_interval - 800
+				 * scan_window - 800
+				 * passive scan mode */
+				gecko_cmd_le_gap_set_scan_parameters(100, 100, 1);
+
+				/* Start the GAP discovery */
+				gecko_cmd_le_gap_discover(le_gap_general_discoverable); /* Discover using general discoverable mode */
+
+				e_dev_role = DEVICE_ROLE_SLAVE;
+				gecko_cmd_hardware_set_soft_timer(DEV_SLAVE_PERIOD, MASTER_SLAVE_RR_TIMER, true);
+			}
+			else
+			{
+				/* Do Nothing */
+			}
+			break;
+#endif
+
+		case HUMIDITY_TIMER:
+#ifdef MEASURE_ONBOARD_HUMIDITY
+			if (e_dev_role == DEVICE_ROLE_SLAVE)
+			{
+				appHwReadHumidity((uint32_t *)&humidityData);
+
+				htmHumidityMeas.humidity = humidityData/1000;
+
+				//htmHumidityMeas.humidity = 45;
+
+				gecko_cmd_gatt_server_write_attribute_value(gattdb_humidity_measurement,
+						0,
+						sizeof(struct htmHumidityMeas_t),
+						(uint8_t *)&htmHumidityMeas);
+			}
+#endif
+			break;
+		case TEMP_TIMER: /* Temperature measurement timer */
+#ifdef MEASURE_ONBOARD_TEMPERATURE
+			if (e_dev_role == DEVICE_ROLE_SLAVE)
+			{
+				/* Make a temperature measurement */
+				htmTemperatureMeasure();
+			}
+#endif
+			break;
+		case SLAVE_ROLE_TIMER:
+#ifdef ENABLE_SLAVE_ROLE
+			manage_master_slave_role_led();
+#endif
+			break;
+		case MASTER_ROLE_TIMER:
+#ifdef ENABLE_MASTER_ROLE
+			manage_master_slave_role_led();
+#endif
+			break;
 		default:
 			break;
 		}
@@ -546,7 +833,22 @@ void appHandleEvents(struct gecko_cmd_packet *evt)
 
 		default:
 			break;
-	}
+
+		case gecko_evt_gatt_server_characteristic_status_id:
+#ifdef MEASURE_TEMPERATURE
+			/* Check if changed client char config is for the temperature measurement */
+			if ((gattdb_temp_measurement == evt->data.evt_gatt_server_attribute_value.attribute)
+					&& (evt->data.evt_gatt_server_characteristic_status.status_flags == 0x01)) {
+				// Call HTM temperature characteristic status changed callback
+				htmTemperatureCharStatusChange(
+						evt->data.evt_gatt_server_characteristic_status.connection,
+						evt->data.evt_gatt_server_characteristic_status.client_config_flags);
+			}
+#endif
+
+			break;
+
+		}
 }
 
 /**************************************************************************//**

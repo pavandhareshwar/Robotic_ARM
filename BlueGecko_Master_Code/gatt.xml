@@ -78,18 +78,6 @@
       </characteristic>
     </service>
     
-    <!--Link Loss-->
-    <service advertise="true" name="Link Loss" requirement="mandatory" sourceId="org.bluetooth.service.link_loss" type="primary" uuid="1803">
-      <informativeText>Custom service</informativeText>
-      
-      <!--Alert Level-->
-      <characteristic id="xgatt_loss" name="Alert Level" sourceId="org.bluetooth.service.alert_level" uuid="2A06">
-        <informativeText>Custom characteristic</informativeText>
-        <value length="1" type="hex" variable_length="false">1</value>
-        <properties read="true" read_requirement="optional" write="true" write_requirement="optional"/>
-      </characteristic>
-    </service>
-    
     <!--Environmental Sensing-->
     <service advertise="true" name="Environmental Sensing" requirement="mandatory" sourceId="org.bluetooth.service.environmental_sensing" type="primary" uuid="181A">
       <informativeText>Custom service</informativeText>

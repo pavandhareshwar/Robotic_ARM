@@ -20,6 +20,7 @@
 #include "infrastructure.h"
 
 /* application specific headers */
+#include "app.h"
 #include "app_hw.h"
 #include "app_ui.h"
 #include "app_timer.h"
@@ -217,10 +218,15 @@ void htmTemperatureMeasure(void)
   uint8_t htmTempBuffer[ATT_DEFAULT_PAYLOAD_LEN]; /* Stores the temperature data in the HTM format. */
   uint8_t length; /* Length of the temperature measurement characteristic */
 
+#if 0
   /* Check if the connection is still open */
-  if (HTM_NO_CONNECTION == htmClientConnection) {
+  if (HTM_NO_CONNECTION == htmClientConnection)
+  {
     return;
   }
+#else
+  htmClientConnection = slave_connection;
+#endif
 
   e_therm_measure_val = MEASURE_TYPE_TEMP;
   /* Create the temperature measurement characteristic in htmTempBuffer and store its length */
@@ -377,7 +383,7 @@ uint8_t htmProcMsg(uint8_t *buf, thermometer_measure_val e_therm_measure_val)
 	  /* Build temperature measurement characteristic and store data length */
 	  len = htmBuildTempMeas(buf, &htmTempMeas);
   }
-#if 0
+#ifdef MEASURE_HUMIDITY
   else if (e_therm_measure_val == MEASURE_TYPE_HUMIDITY)
   {
 	  /* Read temperature and check if read successfully */

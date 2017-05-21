@@ -46,7 +46,7 @@
     || (EMBER_AF_BOARD_TYPE == BRD4300AREVA02) \
     || (EMBER_AF_BOARD_TYPE == BRD4300AREVA03) \
     || (EMBER_AF_BOARD_TYPE == BRD4302A)
-#define FEATURE_LCD_SUPPORT
+//#define FEATURE_LCD_SUPPORT
 #endif
 
 /* Indicate if the same pins are used for LEDs and Buttons on the WSTK */

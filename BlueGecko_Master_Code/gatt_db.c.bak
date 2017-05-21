@@ -165,7 +165,7 @@ GATT_DATA(const struct bg_gattdb_buffer_with_len	bg_gattdb_data_attribute_field_
 	.len=5,
 	.data={0x02,0x09,0x00,0x01,0x2a,}
 };
-uint8_t bg_gattdb_data_attribute_field_6_data[5]={0x50,0x61,0x76,0x61,0x6e,};
+uint8_t bg_gattdb_data_attribute_field_6_data[5]={0x50,0x40,0x56,0x40,0x4e,};
 GATT_DATA(const struct bg_gattdb_attribute_chrvalue	bg_gattdb_data_attribute_field_6 ) = {
 	.properties=0x0a,
 	.index=1,

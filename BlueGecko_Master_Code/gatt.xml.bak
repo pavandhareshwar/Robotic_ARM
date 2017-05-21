@@ -11,7 +11,7 @@
       <!--Device Name-->
       <characteristic id="device_name" name="Device Name" sourceId="org.bluetooth.characteristic.gap.device_name" uuid="2a00">
         <informativeText/>
-        <value length="5" type="utf-8" variable_length="false">Pavan</value>
+        <value length="5" type="utf-8" variable_length="false">P@V@N</value>
         <properties read="true" read_requirement="optional" write="true" write_requirement="optional"/>
       </characteristic>
       
